@@ -1,0 +1,5 @@
+{
+  "name": "Neon Tetris Pro",
+  "description": "A world-class Tetris implementation featuring smooth mechanics, neon aesthetics, and an AI commentator powered by Gemini to cheer you on as you clear lines.",
+  "requestFramePermissions": []
+}

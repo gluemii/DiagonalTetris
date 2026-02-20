@@ -1,0 +1,95 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Tetris Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #020617;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            margin: 0;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        .tetris-grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(20, 1fr);
+            gap: 1px;
+            background-color: rgba(30, 41, 59, 0.5);
+        }
+        .block-shadow {
+            box-shadow: inset 0 0 8px rgba(255, 255, 255, 0.2);
+        }
+        .neon-border {
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+        }
+        
+        /* 라인 삭제 애니메이션 */
+        @keyframes line-flash {
+            0% { 
+                filter: brightness(1) white;
+                background-color: white;
+                box-shadow: 0 0 20px 10px white;
+                transform: scale(1);
+            }
+            50% { 
+                filter: brightness(2);
+                background-color: #fff;
+                box-shadow: 0 0 40px 20px white;
+                transform: scale(1.1);
+            }
+            100% { 
+                filter: brightness(1);
+                background-color: transparent;
+                box-shadow: 0 0 0px transparent;
+                transform: scale(0);
+            }
+        }
+        .clearing-flash {
+            animation: line-flash 0.4s ease-out forwards;
+            z-index: 40;
+            position: relative;
+        }
+
+        /* 블록이 채워질 때의 팝인 애니메이션 */
+        @keyframes block-pop {
+            0% { transform: scale(0); opacity: 0; filter: brightness(3); }
+            70% { transform: scale(1.2); opacity: 1; filter: brightness(1.5); }
+            100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+        }
+        .filling-pop {
+            animation: block-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .animate-pulse-slow {
+            animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>
