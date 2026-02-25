@@ -16,6 +16,7 @@ export interface GameState {
   grid: (string | null)[][];
   activePiece: ActivePiece;
   nextPieceType: TetrominoType;
+  nextNextPieceType: TetrominoType;
   score: number;
   lines: number;
   gameOver: boolean;

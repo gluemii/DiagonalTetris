@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  COLS, ROWS, TETROMINOS, RANDOM_TETROMINOS, INITIAL_TICK, MIN_TICK 
+  COLS, ROWS, TETROMINOS, RANDOM_TETROMINOS, INITIAL_TICK, MIN_TICK, TetrominoType 
 } from './constants';
 import { GameState, ActivePiece, Position } from './types';
 import { 
@@ -12,6 +12,8 @@ import { getAICommentary } from './services/geminiService';
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(() => {
     const firstType = RANDOM_TETROMINOS();
+    const nextType = RANDOM_TETROMINOS();
+    const nextNextType = RANDOM_TETROMINOS();
     return {
       grid: createEmptyGrid(),
       activePiece: {
@@ -19,7 +21,8 @@ const App: React.FC = () => {
         pos: { x: Math.floor(COLS / 2) - 2, y: 0 },
         shape: TETROMINOS[firstType].shape,
       },
-      nextPieceType: RANDOM_TETROMINOS(),
+      nextPieceType: nextType,
+      nextNextPieceType: nextNextType,
       score: 0,
       lines: 0,
       gameOver: false,
@@ -35,6 +38,12 @@ const App: React.FC = () => {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const tickRate = Math.max(MIN_TICK, INITIAL_TICK - (gameState.level - 1) * 100);
   const gameLoopRef = useRef<number | null>(null);
+  const isProcessingRef = useRef(false);
+  const gameStateRef = useRef(gameState);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const fetchAICommentary = async (score: number, lines: number, isGameOver: boolean, diagonals: number = 0) => {
     setIsAiLoading(true);
@@ -43,7 +52,7 @@ const App: React.FC = () => {
     setIsAiLoading(false);
   };
 
-  const getNewPiece = (type: any): ActivePiece => ({
+  const getNewPiece = (type: TetrominoType): ActivePiece => ({
     type: type,
     pos: { x: Math.floor(COLS / 2) - 2, y: 0 },
     shape: TETROMINOS[type].shape,
@@ -164,45 +173,80 @@ const App: React.FC = () => {
         }
       }
 
-      const hScore = horizontalLines.length * 150;
-      const dScore = diagonalLineCount * 400;
-      const addedScore = (hScore + dScore + (comboCount * 50)) * gameState.level;
-
-      setGameState(prev => ({
-        ...prev,
-        grid: finalGrid,
-        score: prev.score + addedScore,
-        lines: prev.lines + horizontalLines.length + diagonalLineCount,
-        level: Math.floor((prev.lines + horizontalLines.length + diagonalLineCount) / 10) + 1,
-        clearingCells: new Set(),
-        fillingCells: new Set()
-      }));
+      setGameState(prev => {
+        const hScore = horizontalLines.length * 150;
+        const dScore = diagonalLineCount * 400;
+        const addedScore = (hScore + dScore + (comboCount * 50)) * prev.level;
+        
+        const newLines = prev.lines + horizontalLines.length + diagonalLineCount;
+        const newLevel = Math.floor(newLines / 10) + 1;
+        
+        return {
+          ...prev,
+          grid: finalGrid,
+          score: prev.score + addedScore,
+          lines: newLines,
+          level: newLevel,
+          clearingCells: new Set(),
+          fillingCells: new Set()
+        };
+      });
 
       await new Promise(r => setTimeout(r, 100));
       processLineClearingChain(finalGrid, comboCount + 1);
 
     } else {
+      let shouldCommentGameOver = false;
+      let shouldCommentCombo = false;
+      let currentScore = 0;
+      let currentLines = 0;
+      let currentDiagonals = 0;
+
+      const nextNextNextType = RANDOM_TETROMINOS();
       setGameState(prev => {
         const nextType = prev.nextPieceType;
+        const nextNextType = prev.nextNextPieceType;
         const newActive = getNewPiece(nextType);
+        
+        currentScore = prev.score;
+        currentLines = prev.lines;
+        currentDiagonals = diagonalLineCount;
+
         if (checkCollision(newActive, currentGrid)) {
-          fetchAICommentary(prev.score, prev.lines, true);
+          shouldCommentGameOver = true;
           return { ...prev, grid: currentGrid, isAnimating: false, gameOver: true };
         } else {
-          if (comboCount > 1 || diagonalLineCount > 0) fetchAICommentary(prev.score, prev.lines, false, diagonalLineCount);
+          if (comboCount > 1 || diagonalLineCount > 0) {
+            shouldCommentCombo = true;
+          }
           return {
             ...prev,
             grid: currentGrid,
             isAnimating: false,
             activePiece: newActive,
-            nextPieceType: RANDOM_TETROMINOS()
+            nextPieceType: nextNextType,
+            nextNextPieceType: nextNextNextType
           };
         }
       });
-    }
-  }, [gameState.level, fetchAICommentary]);
 
-  const lockPieceAndSpawn = useCallback((state: GameState) => {
+      isProcessingRef.current = false;
+
+      if (shouldCommentGameOver) {
+        fetchAICommentary(currentScore, currentLines, true);
+      } else if (shouldCommentCombo) {
+        fetchAICommentary(currentScore, currentLines, false, currentDiagonals);
+      }
+    }
+  }, [fetchAICommentary, getNewPiece]);
+
+  const lockPieceAndSpawn = useCallback(() => {
+    const state = gameStateRef.current;
+    if (state.gameOver || state.isPaused) {
+      isProcessingRef.current = false;
+      return;
+    }
+
     const workingGrid = state.grid.map(row => [...row]);
     state.activePiece.shape.forEach((row, y) => {
       row.forEach((value, x) => {
@@ -215,73 +259,94 @@ const App: React.FC = () => {
         }
       });
     });
+
+    setGameState(prev => ({ 
+      ...prev, 
+      grid: workingGrid, 
+      isAnimating: true 
+    }));
+
     processLineClearingChain(workingGrid, 0);
   }, [processLineClearingChain]);
 
   const moveDown = useCallback(() => {
-    setGameState(prev => {
-      if (prev.gameOver || prev.isPaused || prev.isAnimating) return prev;
-      if (!checkCollision(prev.activePiece, prev.grid, { x: 0, y: 1 })) {
-        return {
-          ...prev,
-          activePiece: {
-            ...prev.activePiece,
-            pos: { ...prev.activePiece.pos, y: prev.activePiece.pos.y + 1 }
-          }
-        };
-      } else {
-        setTimeout(() => lockPieceAndSpawn(prev), 0);
-        return prev;
-      }
-    });
+    if (isProcessingRef.current || gameStateRef.current.isAnimating) return;
+    
+    const state = gameStateRef.current;
+    if (state.gameOver || state.isPaused) return;
+
+    if (!checkCollision(state.activePiece, state.grid, { x: 0, y: 1 })) {
+      setGameState(prev => ({
+        ...prev,
+        activePiece: {
+          ...prev.activePiece,
+          pos: { ...prev.activePiece.pos, y: prev.activePiece.pos.y + 1 }
+        }
+      }));
+    } else {
+      isProcessingRef.current = true;
+      setGameState(prev => ({ ...prev, isAnimating: true }));
+      setTimeout(lockPieceAndSpawn, 0);
+    }
   }, [lockPieceAndSpawn]);
 
   const hardDrop = useCallback(() => {
-    setGameState(prev => {
-      if (prev.gameOver || prev.isPaused || prev.isAnimating) return prev;
-      const ghost = getGhostPosition(prev.activePiece, prev.grid);
-      const droppedPiece = { ...prev.activePiece, pos: ghost };
-      setTimeout(() => lockPieceAndSpawn({ ...prev, activePiece: droppedPiece }), 0);
-      return { ...prev, activePiece: droppedPiece };
-    });
+    if (isProcessingRef.current || gameStateRef.current.isAnimating) return;
+    
+    const state = gameStateRef.current;
+    if (state.gameOver || state.isPaused) return;
+
+    const ghost = getGhostPosition(state.activePiece, state.grid);
+    const droppedPiece = { ...state.activePiece, pos: ghost };
+    
+    isProcessingRef.current = true;
+    setGameState(prev => ({ 
+      ...prev, 
+      activePiece: droppedPiece, 
+      isAnimating: true 
+    }));
+    setTimeout(lockPieceAndSpawn, 0);
   }, [lockPieceAndSpawn]);
 
   const moveSide = (dir: number) => {
-    setGameState(prev => {
-      if (prev.gameOver || prev.isPaused || prev.isAnimating) return prev;
-      if (!checkCollision(prev.activePiece, prev.grid, { x: dir, y: 0 })) {
-        return {
-          ...prev,
-          activePiece: {
-            ...prev.activePiece,
-            pos: { ...prev.activePiece.pos, x: prev.activePiece.pos.x + dir }
-          }
-        };
-      }
-      return prev;
-    });
+    if (isProcessingRef.current || gameStateRef.current.isAnimating) return;
+    
+    const state = gameStateRef.current;
+    if (state.gameOver || state.isPaused) return;
+
+    if (!checkCollision(state.activePiece, state.grid, { x: dir, y: 0 })) {
+      setGameState(prev => ({
+        ...prev,
+        activePiece: {
+          ...prev.activePiece,
+          pos: { ...prev.activePiece.pos, x: prev.activePiece.pos.x + dir }
+        }
+      }));
+    }
   };
 
   const rotate = () => {
-    setGameState(prev => {
-      if (prev.gameOver || prev.isPaused || prev.isAnimating) return prev;
-      const newShape = rotatePiece(prev.activePiece.shape);
-      const rotatedPiece = { ...prev.activePiece, shape: newShape };
-      let offset = 0;
-      if (checkCollision(rotatedPiece, prev.grid)) {
-        offset = 1;
-        if (checkCollision({ ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } }, prev.grid)) {
-          offset = -1;
-          if (checkCollision({ ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } }, prev.grid)) {
-            return prev;
-          }
+    if (isProcessingRef.current || gameStateRef.current.isAnimating) return;
+    
+    const state = gameStateRef.current;
+    if (state.gameOver || state.isPaused) return;
+
+    const newShape = rotatePiece(state.activePiece.shape);
+    const rotatedPiece = { ...state.activePiece, shape: newShape };
+    let offset = 0;
+    if (checkCollision(rotatedPiece, state.grid)) {
+      offset = 1;
+      if (checkCollision({ ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } }, state.grid)) {
+        offset = -1;
+        if (checkCollision({ ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } }, state.grid)) {
+          return;
         }
       }
-      return { 
-        ...prev, 
-        activePiece: { ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } } 
-      };
-    });
+    }
+    setGameState(prev => ({ 
+      ...prev, 
+      activePiece: { ...rotatedPiece, pos: { ...rotatedPiece.pos, x: rotatedPiece.pos.x + offset } } 
+    }));
   };
 
   useEffect(() => {
@@ -312,10 +377,14 @@ const App: React.FC = () => {
 
   const restartGame = () => {
     const firstType = RANDOM_TETROMINOS();
+    const nextType = RANDOM_TETROMINOS();
+    const nextNextType = RANDOM_TETROMINOS();
+    isProcessingRef.current = false;
     setGameState({
       grid: createEmptyGrid(),
       activePiece: getNewPiece(firstType),
-      nextPieceType: RANDOM_TETROMINOS(),
+      nextPieceType: nextType,
+      nextNextPieceType: nextNextType,
       score: 0,
       lines: 0,
       gameOver: false,
@@ -328,8 +397,7 @@ const App: React.FC = () => {
     setAiMessage("새 게임 시작! 대각선 파편으로 빈 공간을 채우세요!");
   };
 
-  const renderNextPiece = () => {
-    const type = gameState.nextPieceType;
+  const renderPiecePreview = (type: TetrominoType, idPrefix: string) => {
     const piece = TETROMINOS[type];
     const size = piece.shape.length;
     const offset = size === 4 ? 0 : size === 3 ? 0.5 : 1;
@@ -339,7 +407,7 @@ const App: React.FC = () => {
         if (!val) return null;
         return (
           <div 
-            key={`next-${y}-${x}`} 
+            key={`${idPrefix}-${y}-${x}`} 
             style={{ 
               gridRowStart: Math.floor(y + offset) + 1, 
               gridColumnStart: Math.floor(x + offset) + 1 
@@ -357,8 +425,14 @@ const App: React.FC = () => {
       <div className="flex flex-col gap-4 order-2 md:order-1 w-full max-w-[200px]">
         <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl backdrop-blur-md neon-border">
           <h2 className="text-xs font-orbitron uppercase tracking-widest text-cyan-400 mb-2 text-center">Next</h2>
-          <div className="grid grid-cols-4 grid-rows-4 gap-1 w-20 h-20 mx-auto relative">
-            {renderNextPiece()}
+          <div className="grid grid-cols-4 grid-rows-4 gap-1 w-20 h-20 mx-auto relative mb-4">
+            {renderPiecePreview(gameState.nextPieceType, 'next')}
+          </div>
+          <div className="border-t border-slate-700/50 pt-2">
+            <h2 className="text-[9px] font-orbitron uppercase tracking-widest text-slate-500 mb-2 text-center">Next Next</h2>
+            <div className="grid grid-cols-4 grid-rows-4 gap-1 w-12 h-12 mx-auto relative opacity-50">
+              {renderPiecePreview(gameState.nextNextPieceType, 'next-next')}
+            </div>
           </div>
         </div>
         
